@@ -1,5 +1,30 @@
 import tensorflow as tf
 
+def get_input(inputs, predict_mode, params):
+    l_features = inputs['x_labelled']
+    u_features = inputs['x_unlabelled']
+    l_features = tf.cast(l_features, tf.float32)
+    u_features = tf.cast(u_features, tf.float32)
+
+    # Reshaping MNIST images
+    if params['reshape'] == 'l':
+        l_features = tf.image.resize_images(l_features, params['target_shape'])
+        l_features = tf.image.grayscale_to_rgb(l_features)
+    if params['reshape'] == 'u':
+        u_features = tf.image.resize_images(u_features, params['target_shape'])
+        u_features = tf.image.grayscale_to_rgb(u_features)
+
+    # Eval
+    if not predict_mode:
+        l_labels = inputs['labels']['labelled']
+        u_labels = inputs['labels']['unlabelled']
+    # Train / predict
+    else:
+        l_labels = inputs['labels']
+        u_labels = None
+
+    return l_features, u_features, l_labels, u_labels
+
 def compute_logits(data_in, num_classes, reuse):
     logs = tf.layers.dense(inputs=data_in, units=num_classes, reuse=reuse)
     #For single evals
@@ -81,22 +106,20 @@ def total_loss(labelled_embeddings,
         tf.summary.scalar('assoc_loss', assoc_loss)
         return class_loss + assoc_loss + l2_loss
 
-def find_embedding(features,
-                   dense_dropout_rate,
-                   conv_dropout_rate,
-                   l2_mag,
-                   reuse,
-                   filters=(32, 64, 128),
-                   conv_kernel_size=3,
-                   pool_size=2,
-                   conv_stride=1,
-                   pool_stride=1,
-                   emb_activation='elu',
-                   output_units=128):
-    with tf.variable_scope('embedding'):
+def default_embedding(features,
+                      params,
+                      reuse,
+                      filters=(32, 64, 128),
+                      conv_kernel_size=3,
+                      pool_size=2,
+                      conv_stride=1,
+                      pool_stride=1,
+                      activation_function='elu',
+                      output_units=128):
+    with tf.variable_scope('default_embedding'):
         x = features
         i = 0
-        l2 = tf.contrib.layers.l2_regularizer(scale=l2_mag)
+        l2 = tf.contrib.layers.l2_regularizer(scale=params['l2_mag'])
         for f in filters:
             i += 1
             with tf.variable_scope('conv_block_{}'.format(i), reuse=reuse):
@@ -105,8 +128,8 @@ def find_embedding(features,
                     filters=f,
                     kernel_size=conv_kernel_size,
                     strides=conv_stride,
-                    activation='elu',
                     kernel_regularizer=l2,
+                    activation=activation_function,
                     name='conv2d_1'
                 )
                 x = tf.layers.conv2d(
@@ -114,13 +137,18 @@ def find_embedding(features,
                     filters=f,
                     kernel_size=conv_kernel_size,
                     strides=conv_stride,
-                    activation='elu',
                     kernel_regularizer=l2,
+                    activation=activation_function,
                     name='conv2d_2'
                 )
-                x = tf.layers.dropout(
+                x = tf.layers.conv2d(
                     inputs=x,
-                    rate=conv_dropout_rate
+                    filters=f,
+                    kernel_size=conv_kernel_size,
+                    strides=conv_stride,
+                    kernel_regularizer=l2,
+                    activation=activation_function,
+                    name='conv2d_3'
                 )
                 x = tf.layers.max_pooling2d(
                     inputs=x,
@@ -130,65 +158,56 @@ def find_embedding(features,
                 )
         with tf.variable_scope('fc_emb', reuse=reuse):
             x = tf.layers.flatten(inputs=x, name='flatten')
-            x = tf.layers.dense(
+            emb = tf.layers.dense(
                 inputs=x,
                 units=output_units,
-                activation=emb_activation,
+                activation=activation_function,
                 name='dense'
-            )
-            emb = tf.layers.dropout(
-                inputs=x,
-                rate=dense_dropout_rate
             )
 
         return emb
 
-def get_input(inputs,
-              predict_mode,
-              params):
-    l_features = inputs['x_labelled']
-    u_features = inputs['x_unlabelled']
-    l_features = tf.cast(l_features, tf.float32)
-    u_features = tf.cast(u_features, tf.float32)
+# TODO: Add more models
 
-    # Reshaping MNIST images
-    if params['reshape'] == 'l':
-        l_features = tf.image.resize_images(l_features, params['target_shape'])
-        l_features = tf.image.grayscale_to_rgb(l_features)
-    if params['reshape'] == 'u':
-        u_features = tf.image.resize_images(u_features, params['target_shape'])
-        u_features = tf.image.grayscale_to_rgb(u_features)
-
-    # Eval
-    if not predict_mode:
-        l_labels = inputs['labels']['labelled']
-        u_labels = inputs['labels']['unlabelled']
-    # Train / predict
-    else:
-        l_labels = inputs['labels']
-        u_labels = None
-
-    return l_features, u_features, l_labels, u_labels
+modelDict = {
+}
 
 def get_embedding(u_features,
                   l_features,
-                  train_mode,
-                  conv_dropout,
-                  fc_dropout,
                   params,
                   reuse_first=False):
-
+    '''
+    Helper function to find the embedding
+    :param u_features:
+    :param l_features:
+    :param params:
+    :param reuse_first: Whether or not to reuse the first embedding (i.e., for the first training set)
+    :return: Tuple of unlabelled_embedding, labelled_embedding
+    '''
+    '''
     u_emb = find_embedding(u_features,
                            fc_dropout,
                            conv_dropout,
                            params['l2_mag'],
                            reuse_first)
-
+    '''
+    u_emb = modelDict.setdefault(params['model_to_use'], default_embedding)(
+        u_features,
+        params,
+        reuse_first)
+    '''
     l_emb = find_embedding(l_features,
                            fc_dropout,
                            conv_dropout,
                            params['l2_mag'],
                            True)
+    '''
+    l_emb = modelDict.setdefault(params['model_to_use'], default_embedding)(
+        l_features,
+        params,
+        True
+    )
+
     u_emb = tf.cast(u_emb, tf.float32)
     l_emb = tf.cast(l_emb, tf.float32)
 
@@ -212,14 +231,13 @@ def model_fn(inputs,
     association_loss_weight = params['assoc_w']
     walker_loss_weight = params['w_w']
     visit_loss_weight = params['v_w']
-    learning_rate = params['lr']
     batch_size = params['batch_size']
     num_classes = params['num_classes']
 
     with tf.variable_scope('model'):
-        u_emb, l_emb = get_embedding(u_features, l_features, train_mode, params['conv_dropout'], params['fc_dropout'], params)
+        u_emb, l_emb = get_embedding(u_features, l_features, params)
         if params['use_val'] and train_mode:
-            vu_emb, vl_emb = get_embedding(vuf, vlf, train_mode, 0.0, 0.0, params, True)
+            vu_emb, vl_emb = get_embedding(vuf, vlf, params, True)
         else:
             vu_emb, vl_emb = None, None
 
@@ -264,7 +282,6 @@ def model_fn(inputs,
                               u_emb,
                               l_labels,
                               l_logits,
-                              # use_assoc,
                               association_loss_weight,
                               walker_loss_weight,
                               visit_loss_weight,
@@ -292,8 +309,18 @@ def model_fn(inputs,
             loss, v_loss = None, None
 
     if train_mode:
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
         global_step = tf.train.get_or_create_global_step() if train_mode else None
+        learning_rate = tf.maximum(
+            params['min_lr'],
+            tf.train.exponential_decay(
+                params['lr'],
+                global_step,
+                params['lr_decay_steps'],
+                params['lr_decay_rate']
+            )
+        )
+        tf.summary.scalar('learning_rate', learning_rate)
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
         train_op = optimizer.minimize(loss, global_step)
     else:
         train_op = None
@@ -303,8 +330,8 @@ def model_fn(inputs,
     model_spec['acc_init'] = tf.variables_initializer(acc_var)
     model_spec['l_prediction'] = l_predictions
     model_spec['l_label'] = l_labels
-    model_spec['u_prediction'] = l_predictions
-    model_spec['u_label'] = l_labels
+    model_spec['u_prediction'] = u_predictions
+    model_spec['u_label'] = u_labels
     model_spec['loss'] = loss
     model_spec['summaries'] = tf.summary.merge_all()
     model_spec['update_l_acc'] = l_accuracy[1]

@@ -6,13 +6,13 @@ from tensorflow.python.tools import inspect_checkpoint as chkp
 
 
 def train(x_train_labelled,
-          x_train_unlabelled,
           y_train_labelled,
+          x_train_unlabelled,
           y_train_unlabelled,  # TODO: Make this optional
-          params,  # TODO: Document necessary keys
+          params,  # TODO: Document necessary keys, and set default values
           x_validation_labelled=None,
-          x_validation_unlabelled=None,
           y_validation_labelled=None,
+          x_validation_unlabelled=None,
           y_validaiton_unlabelled=None):  # TODO: Make this optional for validation
     '''
     Function for training the association model
@@ -32,8 +32,8 @@ def train(x_train_labelled,
 
     # Prepare input and model
     xl = tf.placeholder(x_train_labelled.dtype, x_train_labelled.shape)
-    xu = tf.placeholder(x_train_unlabelled.dtype, x_train_unlabelled.shape)
     yl = tf.placeholder(y_train_labelled.dtype, y_train_labelled.shape)
+    xu = tf.placeholder(x_train_unlabelled.dtype, x_train_unlabelled.shape)
     yu = tf.placeholder(y_train_unlabelled.dtype, y_train_unlabelled.shape)
     # Check if we're using a validation set
     # TODO: validation set for checking overfitting / convergence
@@ -45,17 +45,17 @@ def train(x_train_labelled,
     params['use_val'] = use_val
     if use_val:
         vxl = tf.placeholder(x_validation_labelled.dtype, x_validation_labelled.shape)
-        vxu = tf.placeholder(x_validation_unlabelled.dtype, x_validation_unlabelled.shape)
         vyl = tf.placeholder(y_validation_labelled.dtype, y_validation_labelled.shape)
+        vxu = tf.placeholder(x_validation_unlabelled.dtype, x_validation_unlabelled.shape)
         vyu = tf.placeholder(y_validaiton_unlabelled.dtype, y_validaiton_unlabelled.shape)
-        inputs = train_input_fn(xl,xu,yl,yu,
+        inputs = train_input_fn(xl, yl, xu, yu,
                                 params['batch_size'],
                                 params['buffer_size'],
                                 params['epochs'],
                                 True,
-                                vxl,vxu,vyl,vyu)
+                                vxl, vyl, vxu, vyu)
     else:
-        inputs = train_input_fn(xl,xu,yl,yu,
+        inputs = train_input_fn(xl, yl, xu, yu,
                                 params['batch_size'],
                                 params['buffer_size'],
                                 params['epochs'])
@@ -106,15 +106,15 @@ def train(x_train_labelled,
         #Initialize the input iterator for non-validation input
         sess.run(model['iter_init'],
                  {xl: x_train_labelled,
-                  xu:x_train_unlabelled,
-                  yl:y_train_labelled,
-                  yu:y_train_unlabelled})
+                  yl: y_train_labelled,
+                  xu: x_train_unlabelled,
+                  yu: y_train_unlabelled})
         if use_val:
             #Initialize the input iterator for validation input
             sess.run(model['validation']['iter_init'],
                      {vxl: x_validation_labelled,
-                      vxu: x_validation_unlabelled,
                       vyl: y_validation_labelled,
+                      vxu: x_validation_unlabelled,
                       vyu: y_validaiton_unlabelled})
 
         # Count by epochs

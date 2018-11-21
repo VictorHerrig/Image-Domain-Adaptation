@@ -1,46 +1,21 @@
 import numpy as np
 import argparse
-import tensorflow.keras.datasets.mnist as mnist
-import scipy.io as spio
+import tensorflow as tf
 from train import train
 from test import test
-import tensorflow as tf
+from input import load_mnist, load_svhn
 
-def reshape_mnist(set):
-    image = np.true_divide(set, 255)
-    image = np.expand_dims(image, -1)
-    return image
-
-def reshape_svhn(set):
-    ret = set['X']
-    ret = np.true_divide(ret, 255)
-    ret = np.transpose(ret, [3,0,1,2])
-    return ret
 
 def prepare_inut(params):
     print('Preparing data')
-    (x_train_unlabelled, mnist_train_labels), (x_test_unlabelled, test_u_labels) = mnist.load_data()
-    x_train_unlabelled = reshape_mnist(x_train_unlabelled)
-    x_test_unlabelled = reshape_mnist(x_test_unlabelled)
+    x_train_unlabelled, y_train_unlabelled, x_test_unlabelled, y_test_unlabelled = load_mnist(60000, 10000)
+    x_train_labelled, y_train_labelled, x_test_labelled, y_test_labelled = \
+        load_svhn('svhn_train.mat', 'svhn_test.mat', 60000, 10000)
 
-    svhn_train = spio.loadmat('svhn_train.mat')
-    x_train_labelled = reshape_svhn(svhn_train)[:60000, :, :, :]
-    svhn_train_labels = svhn_train['y'][:60000, :]
-    # 0s have label of 10 in SVHN... Fix that
-    svhn_train_labels = np.apply_along_axis(lambda x: x if not np.equal(x, 10) else 0, -1, svhn_train_labels)
-    mnist_train_labels = np.reshape(mnist_train_labels, (mnist_train_labels.shape[0]))
-    svhn_train_labels = np.reshape(svhn_train_labels, (svhn_train_labels.shape[0]))
-    params['target_shape'] = (x_train_labelled.shape[1], x_train_labelled.shape[2])
-
-    svhn_test = spio.loadmat('svhn_test.mat')
-    x_test_labelled = reshape_svhn(svhn_test)[:10000, :, :, :]
-    test_svhn_labels = svhn_test['y'][:10000, :]
-    # 0s have label of 10 in SVHN... Fix that
-    test_svhn_labels = np.apply_along_axis(lambda x: x if not np.equal(x, 10) else 0, -1, test_svhn_labels)
-    test_l_labels = np.reshape(test_svhn_labels, (test_svhn_labels.shape[0]))
     params['target_shape'] = (x_test_labelled.shape[1], x_test_labelled.shape[2])
-    return x_train_labelled, x_train_unlabelled, svhn_train_labels, mnist_train_labels, params,\
-           x_test_labelled, x_test_unlabelled, test_l_labels, test_u_labels
+
+    return x_train_labelled, y_train_labelled, x_train_unlabelled, y_train_unlabelled, params,\
+           x_test_labelled, y_test_labelled, x_test_unlabelled, y_test_unlabelled
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='model params')
@@ -48,6 +23,9 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', help='Number of epochs over which to train', type=int, default=None)
     parser.add_argument('--steps', help='Number of steps over which to train', type=int, default=10000)
     parser.add_argument('--lr', help='Learning rate of the optimizer', type=float, default=0.0001)
+    parser.add_argument('--min_lr', help='Minimum learning rate to use', type=float, default=0.000001)
+    parser.add_argument('--lr_decay_steps', help='Number of steps for lr decay', type=str, default=10000)
+    parser.add_argument('--lr_decay_rate', help='Rate of lr decay', type=float, default=0.33)
     parser.add_argument('--visit_w', help='Weight assigned to the visit loss', type=float, default=1.0)
     parser.add_argument('--assoc_w', help='Weight assigned to the association loss', type=float, default=1.0)
     parser.add_argument('--walk_w', help='Weight assigned to the walker loss', type=float, default=1.0)
@@ -62,6 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--conv_dropout', help='Dropout rate for the conv blocks', type=float, default=0.0)
     parser.add_argument('--l2_mag', help='Lambda value for l2 regularization', type=float, default=0.0)
     parser.add_argument('--use_val', help='Whether or not to use validation', action='store_true', default=False)
+    parser.add_argument('--model_to_use', help='The model to use for embedding - default, Adam, Inception or Dense', type=str, default='')
     args = parser.parse_args()
 
     #Exactly one of epochs or steps is None
@@ -70,6 +49,9 @@ if __name__ == '__main__':
     params = {
         'assoc_w': args.assoc_w,
         'lr': args.lr,
+        'min_lr': args.min_lr,
+        'lr_decay_rate': args.lr_decay_rate,
+        'lr_decay_steps': args.lr_decay_steps,
         'batch_size': args.batch_size,
         'w_w': args.walk_w,
         'v_w': args.visit_w,
@@ -80,36 +62,21 @@ if __name__ == '__main__':
         'steps': args.steps,
         'log_step': args.log_step,
         'reshape': 'u',
-        # 'assoc_thresh': args.assoc_thresh,
         'conv_dropout': args.conv_dropout,
         'fc_dropout': args.fc_dropout,
         'l2_mag': args.l2_mag,
-        'use_val': args.use_val
+        'use_val': args.use_val,
+        'model_to_use': args.model_to_use
     }
 
-    if args.test and args.train:
+    if args.train or args.test:
         data_in = prepare_inut(params)
-        with tf.Graph().as_default():
-            train(data_in[0], data_in[1], data_in[2], data_in[3],
-                  data_in[4], data_in[5], data_in[6], data_in[7], data_in[8])
-        with tf.Graph().as_default():
-            test(data_in[6], data_in[8], data_in[5], data_in[7], data_in[4])
 
-    elif args.train:
-        data_in = prepare_inut(params)
-        train(data_in[0], data_in[1], data_in[2], data_in[3],
-              data_in[4], data_in[5], data_in[6], data_in[7], data_in[8])
-
-    elif args.test:
-        print('Preparing testing data')
-        (_, _), (x_test_unlabelled, test_u_labels) = mnist.load_data()
-        x_test_unlabelled = reshape_mnist(x_test_unlabelled)
-
-        svhn_test = spio.loadmat('svhn_test.mat')
-        x_test_labelled = reshape_svhn(svhn_test)[:10000, :, :, :]
-        test_svhn_labels = svhn_test['y'][:10000,:]
-        # 0s have label of 10 in SVHN... Fix that
-        test_svhn_labels = np.apply_along_axis(lambda x: x if not np.equal(x, 10) else 0, -1, test_svhn_labels)
-        test_l_labels = np.reshape(test_svhn_labels, (test_svhn_labels.shape[0]))
-        params['target_shape'] = (x_test_labelled.shape[1], x_test_labelled.shape[2])
-        test(x_test_unlabelled, test_u_labels, x_test_labelled, test_l_labels, params)
+        if args.train:
+            with tf.Graph().as_default():
+                # train(data_in[0], data_in[1], data_in[2], data_in[3],
+                #       data_in[4], data_in[5], data_in[6], data_in[7], data_in[8])
+                train(*data_in)
+        if args.test:
+            with tf.Graph().as_default():
+                test(data_in[5], data_in[6], data_in[7], data_in[8], data_in[4])

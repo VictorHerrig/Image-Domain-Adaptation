@@ -1,13 +1,47 @@
 import tensorflow as tf
+import numpy as np
+import scipy.io as spio
+import tensorflow.keras.datasets.mnist as mnist
 
-def train_input_fn(x_labelled, x_unlabelled, l_labels, u_labels, batch_size, buffer_size, epochs,
-                   use_val = False, x_lab_val=None, x_unlab_val=None, y_lab_val=None, y_unlab_val=None):
+def load_mnist(train_limit, test_limit):
+    def reshape_mnist(set):
+        image = np.true_divide(set, 255)
+        image = np.expand_dims(image, -1)  # Add a grayscale dimension
+        return image
+
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    x_train = reshape_mnist(x_train)[:train_limit, :, :, :]
+    y_train = np.reshape(y_train, (y_train.shape[0]))[:train_limit]
+    x_test = reshape_mnist(x_test)[:test_limit, :, :, :]
+    y_test = np.reshape(y_test, (y_test.shape[0]))[:test_limit]
+
+    return x_train, y_train, x_test, y_test
+
+def load_svhn(train_file, test_file, train_limit, test_limit):
+    def helper(file, limit):
+        loaded = spio.loadmat(file)
+        x = loaded['X']
+        x = np.true_divide(x, 255)
+        x = np.transpose(x, [3, 0, 1, 2])[:limit, :, :, :]  # Batch first
+        y = loaded['y']
+        # 0s have label of 10 in SVHN... Fix that, and reshape to rank 1
+        y = np.apply_along_axis(lambda x: x if not np.equal(x, 10) else 0, -1, y)
+        y = np.reshape(y, (y.shape[0]))[:limit]
+        return x, y
+
+    x_train, y_train = helper(train_file, train_limit)
+    x_test, y_test = helper(test_file, test_limit)
+
+    return x_train, y_train, x_test, y_test
+
+def train_input_fn(x_labelled, y_labelled, x_unlabelled, y_unlabelled, batch_size, buffer_size, epochs,
+                   use_val=False, x_lab_val=None, y_lab_val=None, x_unlab_val=None, y_unlab_val=None):
     '''
     Function for creating the input iterator for training the model
     :param x_labelled: Labelled training images
     :param x_unlabelled: Unlabelled training images
-    :param l_labels: Labels for labelled training set
-    :param u_labels: Labels for 'unlabelled' training set
+    :param y_labelled: Labels for labelled training set
+    :param y_unlabelled: Labels for 'unlabelled' training set
     :param batch_size: Batch size to use for the iterator
     :param buffer_size: Buffer size to use when shuffling the data
     :param epochs: Number of epochs to repeat for - value of None repeats indefinitely
@@ -20,7 +54,7 @@ def train_input_fn(x_labelled, x_unlabelled, l_labels, u_labels, batch_size, buf
     '''
     # TODO: Different batch size for validation data
 
-    dataset = tf.data.Dataset.from_tensor_slices((x_labelled, x_unlabelled, l_labels, u_labels))
+    dataset = tf.data.Dataset.from_tensor_slices((x_labelled, x_unlabelled, y_labelled, y_unlabelled))
     dataset = dataset.apply(tf.contrib.data.shuffle_and_repeat(buffer_size, epochs))
     dataset = dataset.batch(batch_size).prefetch(1)
     iter = dataset.make_initializable_iterator()
@@ -56,19 +90,19 @@ def train_input_fn(x_labelled, x_unlabelled, l_labels, u_labels, batch_size, buf
 
     return ret
 
-def test_input_fn(x_test_labelled, x_test_unlabelled, labelled_labels, unlabelled_labels, batch_size, buffer_size):
+def test_input_fn(x_test_labelled, y_test_labelled, x_test_unlabelled, y_test_unlabelled, batch_size, buffer_size):
     '''
     Function for creating the input iterator for testing the model
     :param x_test_labelled: Labelled test images
     :param x_test_unlabelled: Unlabelled test images
-    :param labelled_labels: Labels for labelled test images
-    :param unlabelled_labels: Labels for 'unlabelled' test images
+    :param y_test_labelled: Labels for labelled test images
+    :param y_test_unlabelled: Labels for 'unlabelled' test images
     :param batch_size: Batch size to use for the iterator
     :param buffer_size: Buffer size to use when shuffling the data
     :return:
     '''
     dataset = tf.data.Dataset.from_tensor_slices((x_test_labelled, x_test_unlabelled,
-                                                  labelled_labels, unlabelled_labels))
+                                                  y_test_labelled, y_test_unlabelled))
     dataset = dataset.shuffle(buffer_size)
     dataset = dataset.batch(batch_size).prefetch(1)
     iter = dataset.make_initializable_iterator()
